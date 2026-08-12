@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, Sun } from 'lucide-react';
 import { DateMemory } from '../types';
+import { compressImage } from '../utils/image';
 
 interface AddModalProps {
   isOpen: boolean;
@@ -43,17 +44,32 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
 
   if (!isOpen) return null;
 
+  const [isCompressing, setIsCompressing] = useState(false);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        if (ev.target?.result) {
-          setPhotos((prev) => [...prev, ev.target!.result as string]);
-        }
-      };
-      reader.readAsDataURL(file);
+
+    setIsCompressing(true);
+    const promises = Array.from(files).map((file) => {
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          if (ev.target?.result) {
+            const compressed = await compressImage(ev.target.result as string);
+            resolve(compressed);
+          } else {
+            resolve('');
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(promises).then((results) => {
+      const validImages = results.filter((r) => r !== '');
+      setPhotos((prev) => [...prev, ...validImages]);
+      setIsCompressing(false);
     });
   };
 
@@ -139,10 +155,12 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
             <div className="flex gap-2 mb-2">
               <button
                 type="button"
+                disabled={isCompressing}
                 onClick={() => fileRef.current?.click()}
-                className="px-3 py-2 rounded-xl border border-dashed border-slate-300 text-xs text-slate-500 hover:border-amber-400 hover:text-amber-500 transition-colors flex items-center gap-1.5"
+                className="px-3 py-2 rounded-xl border border-dashed border-slate-300 text-xs text-slate-500 hover:border-amber-400 hover:text-amber-500 transition-colors flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Upload className="w-3.5 h-3.5" /> Upload
+                <Upload className="w-3.5 h-3.5" />
+                <span>{isCompressing ? 'Compressing...' : 'Upload'}</span>
               </button>
               <input ref={fileRef} type="file" multiple accept="image/*" onChange={handleFileUpload} className="hidden" />
               <input
