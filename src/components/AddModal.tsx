@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, Sun } from 'lucide-react';
 import { DateMemory } from '../types';
-import { compressImage } from '../utils/image';
 
 interface AddModalProps {
   isOpen: boolean;
@@ -18,6 +17,7 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
   const [photos, setPhotos] = useState<string[]>([]);
   const [secretNote, setSecretNote] = useState('');
   const [urlInput, setUrlInput] = useState('');
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Reset form when modal opens
@@ -44,33 +44,58 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
 
   if (!isOpen) return null;
 
-  const [isCompressing, setIsCompressing] = useState(false);
+  // Compress image so it fits inside Firestore's 1MB document limit
+  const compressImage = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1000; // max width/height in px
+          let { width, height } = img;
+          if (width > height && width > MAX) {
+            height = (height * MAX) / width;
+            width = MAX;
+          } else if (height > MAX) {
+            width = (width * MAX) / height;
+            height = MAX;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return reject('no ctx');
+          ctx.drawImage(img, 0, 0, width, height);
+          // Step down quality until under ~350KB so several photos fit in one doc
+          let quality = 0.75;
+          let out = canvas.toDataURL('image/jpeg', quality);
+          while (out.length > 350_000 && quality > 0.3) {
+            quality -= 0.1;
+            out = canvas.toDataURL('image/jpeg', quality);
+          }
+          resolve(out);
+        };
+        img.onerror = reject;
+        img.src = ev.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-
     setIsCompressing(true);
-    const promises = Array.from(files).map((file) => {
-      return new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          if (ev.target?.result) {
-            const compressed = await compressImage(ev.target.result as string);
-            resolve(compressed);
-          } else {
-            resolve('');
-          }
-        };
-        reader.readAsDataURL(file);
-      });
-    });
-
-    Promise.all(promises).then((results) => {
-      const validImages = results.filter((r) => r !== '');
-      setPhotos((prev) => [...prev, ...validImages]);
-      setIsCompressing(false);
-    });
+    for (const file of Array.from(files)) {
+      try {
+        const compressed = await compressImage(file);
+        setPhotos((prev) => [...prev, compressed]);
+      } catch {
+        // skip failed file
+      }
+    }
+    setIsCompressing(false);
+    e.target.value = '';
   };
 
   const handleAddUrl = () => {
@@ -155,12 +180,11 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
             <div className="flex gap-2 mb-2">
               <button
                 type="button"
-                disabled={isCompressing}
                 onClick={() => fileRef.current?.click()}
+                disabled={isCompressing}
                 className="px-3 py-2 rounded-xl border border-dashed border-slate-300 text-xs text-slate-500 hover:border-amber-400 hover:text-amber-500 transition-colors flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Upload className="w-3.5 h-3.5" />
-                <span>{isCompressing ? 'Compressing...' : 'Upload'}</span>
+                <Upload className="w-3.5 h-3.5" /> {isCompressing ? 'Compressing...' : 'Upload'}
               </button>
               <input ref={fileRef} type="file" multiple accept="image/*" onChange={handleFileUpload} className="hidden" />
               <input
