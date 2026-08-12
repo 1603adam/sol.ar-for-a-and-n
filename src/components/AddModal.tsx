@@ -49,26 +49,28 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-
     setIsCompressing(true);
-    const promises = Array.from(files).map((file) => {
-      return new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          if (ev.target?.result) {
-            const compressed = await compressImage(ev.target.result as string);
-            resolve(compressed);
-          } else {
-            resolve('');
-          }
-        };
-        reader.readAsDataURL(file);
-      });
-    });
 
-    Promise.all(promises).then((results) => {
-      const validImages = results.filter((r) => r !== '');
-      setPhotos((prev) => [...prev, ...validImages]);
+    Promise.all(
+      Array.from(files).map(async (file) => {
+        return new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            try {
+              if (ev.target?.result) {
+                const compressed = await compressImage(ev.target.result as string);
+                resolve(compressed);
+              } else resolve('');
+            } catch { resolve(''); }
+          };
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
+      })
+    ).then((results) => {
+      setPhotos((prev) => [...prev, ...results.filter((r) => r && r.length > 0)]);
+      setIsCompressing(false);
+    }).catch(() => {
       setIsCompressing(false);
     });
   };
@@ -98,8 +100,8 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-up">
-      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-amber-100">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md" style={{ animation: 'fade-up 0.3s ease-out both' }}>
+      <div className="relative z-[70] bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-amber-100">
         {/* Header */}
         <div className="flex items-center justify-between p-5 pb-0">
           <h2 className="text-lg font-semibold text-slate-800 font-serif flex items-center gap-2">
