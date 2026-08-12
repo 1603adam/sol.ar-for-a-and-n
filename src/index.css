@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-serif {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+  }
+  .font-script {
+    font-family: 'Dancing Script', cursive;
+  }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes gentle-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* Slowly rotating sun rays */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Sun glow breathing */
+@keyframes sun-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(251,191,36,0.6)); transform: scale(1); }
+  50% { filter: drop-shadow(0 0 14px rgba(251,146,60,0.8)); transform: scale(1.05); }
+}
+
+@keyframes float-up {
+  0% { opacity: 0; transform: translateY(0) scale(0); }
+  10% { opacity: 1; transform: translateY(-10px) scale(1); }
+  90% { opacity: 0.5; }
+  100% { opacity: 0; transform: translateY(-130px) scale(0.6) rotate(30deg); }
+}
+
+.animate-fade-up { animation: fade-up 0.5s ease-out both; }
+.animate-gentle-pulse { animation: gentle-pulse 2s ease-in-out infinite; }
+.animate-spin-slow { animation: spin-slow 40s linear infinite; }
+.animate-sun-glow { animation: sun-glow 4s ease-in-out infinite; }
+.animate-float-up { animation: float-up 3.5s ease-out forwards; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(251,146,60,0.3); border-radius: 999px; }
+
+/* Warm sunbeam dot pattern */
+.bg-dots {
+  background-image: radial-gradient(rgba(251,191,36,0.08) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+/* Big radial sun glow behind the page */
+.sun-backdrop {
+  background:
+    radial-gradient(circle at 50% -10%, rgba(254,240,138,0.55), transparent 55%),
+    radial-gradient(circle at 85% 15%, rgba(253,186,116,0.35), transparent 45%),
+    linear-gradient(to bottom, #fffdf5 0%, #fff8ed 40%, #fff1e0 100%);
+}
