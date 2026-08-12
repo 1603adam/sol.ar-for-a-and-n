@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Sun } from 'lucide-react';
 import { DateMemory } from '../types';
 import { compressImage } from '../utils/image';
@@ -12,67 +12,75 @@ interface AddModalProps {
 
 export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, editData }) => {
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState('');
   const [location, setLocation] = useState('');
   const [story, setStory] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [secretNote, setSecretNote] = useState('');
   const [urlInput, setUrlInput] = useState('');
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Reset form when modal opens
-  React.useEffect(() => {
-    if (isOpen) {
-      if (editData) {
-        setTitle(editData.title);
-        setDate(editData.date);
-        setLocation(editData.location);
-        setStory(editData.story);
-        setPhotos(editData.photos);
-        setSecretNote(editData.secretNote || '');
-      } else {
-        setTitle('');
-        setDate(new Date().toISOString().split('T')[0]);
-        setLocation('');
-        setStory('');
-        setPhotos([]);
-        setSecretNote('');
-      }
-      setUrlInput('');
+  // All hooks run every render — never after a conditional return
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (editData) {
+      setTitle(editData.title || '');
+      setDate(editData.date || new Date().toISOString().split('T')[0]);
+      setLocation(editData.location || '');
+      setStory(editData.story || '');
+      setPhotos(Array.isArray(editData.photos) ? editData.photos : []);
+      setSecretNote(editData.secretNote || '');
+    } else {
+      setTitle('');
+      setDate(new Date().toISOString().split('T')[0]);
+      setLocation('');
+      setStory('');
+      setPhotos([]);
+      setSecretNote('');
     }
+    setUrlInput('');
+    setIsCompressing(false);
+    setIsSaving(false);
   }, [isOpen, editData]);
-
-  if (!isOpen) return null;
-
-  const [isCompressing, setIsCompressing] = useState(false);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
-    setIsCompressing(true);
+    if (!files || files.length === 0) return;
 
-    Promise.all(
-      Array.from(files).map(async (file) => {
-        return new Promise<string>((resolve) => {
+    setIsCompressing(true);
+    const promises = Array.from(files).map(
+      (file) =>
+        new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onload = async (ev) => {
             try {
               if (ev.target?.result) {
                 const compressed = await compressImage(ev.target.result as string);
                 resolve(compressed);
-              } else resolve('');
-            } catch { resolve(''); }
+              } else {
+                resolve('');
+              }
+            } catch {
+              resolve('');
+            }
           };
           reader.onerror = () => resolve('');
           reader.readAsDataURL(file);
-        });
+        })
+    );
+
+    Promise.all(promises)
+      .then((results) => {
+        const valid = results.filter(Boolean);
+        setPhotos((prev) => [...prev, ...valid]);
       })
-    ).then((results) => {
-      setPhotos((prev) => [...prev, ...results.filter((r) => r && r.length > 0)]);
-      setIsCompressing(false);
-    }).catch(() => {
-      setIsCompressing(false);
-    });
+      .finally(() => setIsCompressing(false));
+
+    // reset so same file can be re-selected
+    e.target.value = '';
   };
 
   const handleAddUrl = () => {
@@ -82,39 +90,53 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !date) return;
+    if (!title.trim() || !date || isSaving) return;
 
-    onSave({
-      id: editData?.id,
-      title: title.trim(),
-      date,
-      location: location.trim(),
-      story: story.trim(),
-      photos,
-      secretNote: secretNote.trim() || undefined,
-      isFavorite: editData?.isFavorite ?? false,
-    });
-    onClose();
+    setIsSaving(true);
+    try {
+      await Promise.resolve(
+        onSave({
+          id: editData?.id,
+          title: title.trim(),
+          date,
+          location: location.trim(),
+          story: story.trim(),
+          photos,
+          secretNote: secretNote.trim() || undefined,
+          isFavorite: editData?.isFavorite ?? false,
+        })
+      );
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md" style={{ animation: 'fade-up 0.3s ease-out both' }}>
-      <div className="relative z-[70] bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-amber-100">
-        {/* Header */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-amber-100">
         <div className="flex items-center justify-between p-5 pb-0">
           <h2 className="text-lg font-semibold text-slate-800 font-serif flex items-center gap-2">
             <Sun className="w-4 h-4 text-amber-500" />
             {editData ? 'Edit Date' : 'New Date'}
           </h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400">
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {/* Title */}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Title</label>
             <input
@@ -123,11 +145,10 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
               placeholder="Sunset picnic at the park"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
             />
           </div>
 
-          {/* Date & Location */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
@@ -136,7 +157,7 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
                 required
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
               />
             </div>
             <div>
@@ -146,12 +167,11 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
                 placeholder="Central Park"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
               />
             </div>
           </div>
 
-          {/* Photos */}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1.5">Photos</label>
             <div className="flex gap-2 mb-2">
@@ -164,14 +184,26 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
                 <Upload className="w-3.5 h-3.5" />
                 <span>{isCompressing ? 'Compressing...' : 'Upload'}</span>
               </button>
-              <input ref={fileRef} type="file" multiple accept="image/*" onChange={handleFileUpload} className="hidden" />
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
               <input
                 type="text"
                 placeholder="Or paste image URL..."
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddUrl())}
-                className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddUrl();
+                  }
+                }}
+                className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
               />
               <button
                 type="button"
@@ -182,7 +214,6 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
               </button>
             </div>
 
-            {/* Photo thumbnails */}
             {photos.length > 0 && (
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {photos.map((p, i) => (
@@ -201,7 +232,6 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
             )}
           </div>
 
-          {/* Story */}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Story</label>
             <textarea
@@ -209,11 +239,10 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
               placeholder="What made this date special..."
               value={story}
               onChange={(e) => setStory(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white resize-none"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white resize-none"
             />
           </div>
 
-          {/* Secret Note */}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">
               Secret note <span className="text-slate-400 font-normal">(hidden until revealed)</span>
@@ -223,16 +252,16 @@ export const AddModal: React.FC<AddModalProps> = ({ isOpen, onClose, onSave, edi
               placeholder="A little hidden message..."
               value={secretNote}
               onChange={(e) => setSecretNote(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
             />
           </div>
 
-          {/* Submit */}
           <button
             type="submit"
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-semibold transition-colors shadow-md shadow-amber-500/30"
+            disabled={isSaving || isCompressing}
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-semibold transition-colors shadow-md shadow-amber-500/30 disabled:opacity-60"
           >
-            {editData ? 'Save Changes' : 'Save Date'}
+            {isSaving ? 'Saving...' : editData ? 'Save Changes' : 'Save Date'}
           </button>
         </form>
       </div>
