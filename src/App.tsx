@@ -17,14 +17,18 @@ import {
 } from 'lucide-react';
 import { DateMemory, CoupleInfo } from './types';
 import { AddModal } from './components/AddModal';
-import { db } from './firebase';
+import { db, auth, SECRET_KEY } from './firebase';
 import {
   collection,
   doc,
   onSnapshot,
   setDoc,
-  deleteDoc
+  deleteDoc,
+  query,
+  where,
+  getDoc
 } from 'firebase/firestore';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 // ─── Firebase collection names ───────────────────────────────
 const MEMORIES_COL = 'memories';
@@ -56,48 +60,69 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [days, setDays] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [dbError, setDbError] = useState<string | null>(null);
+  const [isAuthed, setIsAuthed] = useState(false);
 
-  // ─── Live sync with Firestore ─────────────────────────────
+  // ─── Live sync with Firestore (auth-gated + secret key) ──
   useEffect(() => {
-    // Listen to memories in real-time
-    const unsubMemories = onSnapshot(
-      collection(db, MEMORIES_COL),
-      (snapshot) => {
+    // 1. Sign in anonymously (free, no signup)
+    signInAnonymously(auth).catch((err) => console.error('Auth failed', err));
+
+    // 2. Wait for auth, then start listening
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) return;
+      setIsAuthed(true);
+
+      // 3. Listen to memories — only docs matching our secret key
+      const qMemories = query(
+        collection(db, MEMORIES_COL),
+        where('secretKey', '==', SECRET_KEY)
+      );
+      const unsubMemories = onSnapshot(qMemories, (snapshot) => {
         const data: DateMemory[] = [];
-        snapshot.forEach((doc) => {
-          data.push(doc.data() as DateMemory);
+        snapshot.forEach((d) => {
+          data.push(d.data() as DateMemory);
         });
         setMemories(data);
         setIsLoading(false);
-        setDbError(null);
-      },
-      (err) => {
-        console.error('Firestore error:', err);
-        setIsLoading(false);
-        if (err.code === 'permission-denied') {
-          setDbError('Firestore rules are blocking access. Go to Firebase Console → Firestore → Rules and allow read/write.');
-        } else if (err.code === 'unavailable' || err.code === 'failed-precondition') {
-          setDbError('Firestore database not created yet. Go to Firebase Console → Firestore → Create database.');
-        } else {
-          setDbError(`Cloud error: ${err.code}. Check Firebase setup.`);
-        }
-      }
-    );
+      });
 
-    // Listen to couple info
-    const unsubCouple = onSnapshot(doc(db, 'settings', COUPLE_DOC), (snap) => {
-      if (snap.exists()) {
-        setCouple(snap.data() as CoupleInfo);
-      } else {
-        // Create default couple doc if none exists
-        setDoc(doc(db, 'settings', COUPLE_DOC), DEFAULT_COUPLE);
-      }
+      // 4. Listen to couple info
+      const unsubCouple = onSnapshot(doc(db, 'settings', COUPLE_DOC), (snap) => {
+        if (snap.exists()) {
+          const d = snap.data() as any;
+          if (d.secretKey === SECRET_KEY || !d.startDate) {
+            setCouple({
+              partner1: d.partner1 || 'Adam',
+              partner2: d.partner2 || 'Nurin',
+              startDate: d.startDate || '',
+            });
+          }
+        } else {
+          setDoc(doc(db, 'settings', COUPLE_DOC), {
+            ...DEFAULT_COUPLE,
+            secretKey: SECRET_KEY,
+          });
+        }
+      });
+
+      // 5. Create default couple doc if none exists
+      getDoc(doc(db, 'settings', COUPLE_DOC)).then((snap) => {
+        if (!snap.exists()) {
+          setDoc(doc(db, 'settings', COUPLE_DOC), {
+            ...DEFAULT_COUPLE,
+            secretKey: SECRET_KEY,
+          });
+        }
+      });
+
+      return () => {
+        unsubMemories();
+        unsubCouple();
+      };
     });
 
     return () => {
-      unsubMemories();
-      unsubCouple();
+      unsubAuth();
     };
   }, []);
 
@@ -116,34 +141,27 @@ export default function App() {
   const handleSave = useCallback(async (data: Omit<DateMemory, 'id' | 'createdAt'> & { id?: string }) => {
     try {
       if (data.id) {
-        // Update existing
         await setDoc(doc(db, MEMORIES_COL, data.id), {
           ...data,
+          id: data.id,
+          secretKey: SECRET_KEY,
           createdAt: Date.now(),
         });
       } else {
-        // Create new
         const newId = `d_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         await setDoc(doc(db, MEMORIES_COL, newId), {
           ...data,
           id: newId,
+          secretKey: SECRET_KEY,
           createdAt: Date.now(),
         });
         try {
           confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 }, colors: ['#fbbf24', '#f97316', '#fde68a'] });
         } catch {}
       }
-    } catch (err: any) {
-      console.error('Save error:', err);
-      if (err?.code === 'permission-denied') {
-        alert('Permission denied.\n\nFix: Firebase Console → Firestore → Rules tab →\nallow read, write: if true;\n\nThen click Publish.');
-      } else if (err?.code === 'not-found' || err?.code === 'unavailable') {
-        alert('Firestore database not created yet.\n\nFix: Firebase Console → Firestore Database → Create database → Start in test mode.');
-      } else if (err?.message?.includes('longer than')) {
-        alert('Photo too large. Firestore allows max ~1MB per date. Try fewer or smaller photos.');
-      } else {
-        alert(`Failed to save: ${err?.code || err?.message || 'unknown error'}`);
-      }
+    } catch (err) {
+      alert('Failed to save. Please check your internet connection.');
+      console.error(err);
     }
   }, []);
 
@@ -161,7 +179,10 @@ export default function App() {
   // Toggle favorite
   const handleToggleFav = useCallback(async (id: string, currentFav: boolean) => {
     try {
-      await setDoc(doc(db, MEMORIES_COL, id), { isFavorite: !currentFav }, { merge: true });
+      await setDoc(doc(db, MEMORIES_COL, id), {
+        isFavorite: !currentFav,
+        secretKey: SECRET_KEY,
+      }, { merge: true });
     } catch (err) {
       console.error(err);
     }
@@ -170,7 +191,10 @@ export default function App() {
   // Update couple info
   const updateCouple = async (newCouple: CoupleInfo) => {
     try {
-      await setDoc(doc(db, 'settings', COUPLE_DOC), newCouple);
+      await setDoc(doc(db, 'settings', COUPLE_DOC), {
+        ...newCouple,
+        secretKey: SECRET_KEY,
+      });
     } catch (err) {
       alert('Failed to save settings.');
     }
@@ -197,7 +221,10 @@ export default function App() {
         const parsed = JSON.parse(ev.target?.result as string);
         if (parsed.memories) {
           for (const mem of parsed.memories) {
-            await setDoc(doc(db, MEMORIES_COL, mem.id), mem);
+            await setDoc(doc(db, MEMORIES_COL, mem.id), {
+              ...mem,
+              secretKey: SECRET_KEY,
+            });
           }
         }
         if (parsed.couple) {
@@ -298,20 +325,15 @@ export default function App() {
         </AnimatePresence>
       </header>
 
-      {/* Cloud connection error banner */}
-      {dbError && (
-        <div className="max-w-2xl mx-auto px-4 pt-4 relative z-10">
-          <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 leading-relaxed">
-            <strong className="block mb-0.5">⚠️ Cloud sync not working</strong>
-            {dbError}
-          </div>
-        </div>
-      )}
-
       {/* Main content */}
       <main className="max-w-2xl mx-auto px-4 pt-6 pb-20 relative z-10">
-        {isLoading ? (
-          <div className="text-center py-24 text-amber-500">Loading memories from the cloud...</div>
+        {!isAuthed || isLoading ? (
+          <div className="text-center py-24">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-300 to-orange-400 text-white flex items-center justify-center mx-auto mb-4 animate-sun-glow">
+              <Sun className="w-8 h-8 animate-spin-slow" strokeWidth={2} />
+            </div>
+            <p className="text-amber-600 font-serif text-lg">Connecting to the cloud...</p>
+          </div>
         ) : sorted.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
