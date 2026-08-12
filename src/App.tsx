@@ -56,6 +56,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [days, setDays] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   // ─── Live sync with Firestore ─────────────────────────────
   useEffect(() => {
@@ -69,6 +70,18 @@ export default function App() {
         });
         setMemories(data);
         setIsLoading(false);
+        setDbError(null);
+      },
+      (err) => {
+        console.error('Firestore error:', err);
+        setIsLoading(false);
+        if (err.code === 'permission-denied') {
+          setDbError('Firestore rules are blocking access. Go to Firebase Console → Firestore → Rules and allow read/write.');
+        } else if (err.code === 'unavailable' || err.code === 'failed-precondition') {
+          setDbError('Firestore database not created yet. Go to Firebase Console → Firestore → Create database.');
+        } else {
+          setDbError(`Cloud error: ${err.code}. Check Firebase setup.`);
+        }
       }
     );
 
@@ -120,9 +133,17 @@ export default function App() {
           confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 }, colors: ['#fbbf24', '#f97316', '#fde68a'] });
         } catch {}
       }
-    } catch (err) {
-      alert('Failed to save. Please check your internet connection.');
-      console.error(err);
+    } catch (err: any) {
+      console.error('Save error:', err);
+      if (err?.code === 'permission-denied') {
+        alert('Permission denied.\n\nFix: Firebase Console → Firestore → Rules tab →\nallow read, write: if true;\n\nThen click Publish.');
+      } else if (err?.code === 'not-found' || err?.code === 'unavailable') {
+        alert('Firestore database not created yet.\n\nFix: Firebase Console → Firestore Database → Create database → Start in test mode.');
+      } else if (err?.message?.includes('longer than')) {
+        alert('Photo too large. Firestore allows max ~1MB per date. Try fewer or smaller photos.');
+      } else {
+        alert(`Failed to save: ${err?.code || err?.message || 'unknown error'}`);
+      }
     }
   }, []);
 
@@ -276,6 +297,16 @@ export default function App() {
           )}
         </AnimatePresence>
       </header>
+
+      {/* Cloud connection error banner */}
+      {dbError && (
+        <div className="max-w-2xl mx-auto px-4 pt-4 relative z-10">
+          <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 leading-relaxed">
+            <strong className="block mb-0.5">⚠️ Cloud sync not working</strong>
+            {dbError}
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <main className="max-w-2xl mx-auto px-4 pt-6 pb-20 relative z-10">
