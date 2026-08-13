@@ -18,13 +18,7 @@
 ![Animation](https://img.shields.io/badge/ANIMATION-Framer%20Motion-0055FF?style=for-the-badge&logo=framer&logoColor=white)
 ![Deploy](https://img.shields.io/badge/DEPLOY-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
 
-![License](https://img.shields.io/badge/LICENSE-MIT-yellow?style=for-the-badge)
-![Status](https://img.shields.io/badge/STATUS-Active-success?style=for-the-badge)
-![Made With](https://img.shields.io/badge/MADE%20WITH-Warmth-orange?style=for-the-badge)
-
 <br/>
-
-**Built for Adam & Nurin** 🧡
 
 </div>
 
@@ -104,18 +98,18 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /memories/{memoryId} {
-      allow read: if request.auth != null 
+      allow read: if request.auth != null
                   && resource.data.secretKey == "YOUR_SECRET_KEY";
-      allow create: if request.auth != null 
+      allow create: if request.auth != null
                     && request.resource.data.secretKey == "YOUR_SECRET_KEY";
-      allow update, delete: if request.auth != null 
+      allow update, delete: if request.auth != null
                             && resource.data.secretKey == "YOUR_SECRET_KEY";
     }
 
     match /settings/{settingId} {
-      allow read: if request.auth != null 
+      allow read: if request.auth != null
                   && resource.data.secretKey == "YOUR_SECRET_KEY";
-      allow write: if request.auth != null 
+      allow write: if request.auth != null
                    && request.resource.data.secretKey == "YOUR_SECRET_KEY";
     }
   }
@@ -148,6 +142,6 @@ src/
 
 Released under the **MIT License**
 
-**© Adam Iskandar 2026** — Built with warmth ☀️
+**© Adam Iskandar 2026**
 
 </div>
